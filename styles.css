@@ -30,6 +30,33 @@ h1 {
     font-size: 1.1rem;
 }
 
+.snapshot-panel {
+    background: white;
+    border-radius: 16px;
+    padding: 20px 24px;
+    margin-bottom: 20px;
+    box-shadow: 0 10px 40px rgba(0, 0, 0, 0.15);
+}
+
+.snapshot-info {
+    color: #666;
+    font-size: 0.85rem;
+    display: flex;
+    flex-wrap: wrap;
+    align-items: center;
+    gap: 10px;
+}
+
+.unfollowers-section {
+    margin-bottom: 30px;
+}
+
+.unfollowers-info {
+    color: #888;
+    font-size: 0.85rem;
+    margin: 5px 0 10px;
+}
+
 .drop-zone {
     background: white;
     border-radius: 16px;

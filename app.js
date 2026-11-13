@@ -13,11 +13,17 @@ const exportIgnoreListBtn = document.getElementById('exportIgnoreList');
 const importIgnoreListBtn = document.getElementById('importIgnoreListBtn');
 const importIgnoreListInput = document.getElementById('importIgnoreList');
 const clearIgnoreListBtn = document.getElementById('clearIgnoreList');
+const snapshotInfo = document.getElementById('snapshotInfo');
+const clearSnapshotBtn = document.getElementById('clearSnapshot');
+const unfollowersSection = document.getElementById('unfollowersSection');
+const unfollowersTitle = document.getElementById('unfollowersTitle');
+const unfollowersList = document.getElementById('unfollowersList');
 
 let notFollowingBack = [];
 let ignoreList = new Set();
 
 const STORAGE_KEY = 'ig-analyzer-ignore-list';
+const SNAPSHOT_KEY = 'ig-analyzer-snapshot';
 
 // Load ignore list from localStorage
 function loadIgnoreList() {
@@ -40,8 +46,45 @@ function saveIgnoreList() {
     }
 }
 
+function loadSnapshot() {
+    try {
+        const saved = localStorage.getItem(SNAPSHOT_KEY);
+        return saved ? JSON.parse(saved) : null;
+    } catch (e) {
+        console.error('Failed to load snapshot:', e);
+        return null;
+    }
+}
+
+function saveSnapshot(snapshot) {
+    try {
+        localStorage.setItem(SNAPSHOT_KEY, JSON.stringify(snapshot));
+    } catch (e) {
+        console.error('Failed to save snapshot:', e);
+    }
+}
+
+function renderSnapshotInfo() {
+    const snapshot = loadSnapshot();
+    if (!snapshot) {
+        snapshotInfo.textContent = 'No previous export saved. The next export you load will be saved to compare against later.';
+        clearSnapshotBtn.style.display = 'none';
+        return;
+    }
+    snapshotInfo.textContent = `Last export loaded on ${new Date(snapshot.savedAt).toLocaleDateString()} (${snapshot.followers.length} followers). New exports are compared against it.`;
+    clearSnapshotBtn.style.display = 'inline-block';
+}
+
+clearSnapshotBtn.addEventListener('click', () => {
+    if (confirm('Delete the saved previous export from this browser?')) {
+        localStorage.removeItem(SNAPSHOT_KEY);
+        renderSnapshotInfo();
+    }
+});
+
 // Initialize
 loadIgnoreList();
+renderSnapshotInfo();
 
 // Drag and drop handlers
 dropZone.addEventListener('dragover', (e) => {
@@ -201,42 +244,30 @@ async function processFile(file) {
 
     try {
         const zip = await JSZip.loadAsync(file);
+        const exported = await readExport(zip);
 
-        // Find the followers and following files
-        let followersData = null;
-        let followingData = null;
+        if (!exported.hasFollowers) throw new Error('Could not find followers_1.json in the ZIP file.');
+        if (!exported.hasFollowing) throw new Error('Could not find following.json in the ZIP file.');
 
-        for (const [path, zipEntry] of Object.entries(zip.files)) {
-            if (path.includes('followers_and_following/followers_1.json') ||
-                path.endsWith('followers_1.json')) {
-                const content = await zipEntry.async('string');
-                followersData = JSON.parse(content);
-            }
-            if (path.includes('followers_and_following/following.json') ||
-                path.endsWith('following.json')) {
-                const content = await zipEntry.async('string');
-                followingData = JSON.parse(content);
-            }
-        }
-
-        if (!followersData) {
-            throw new Error('Could not find followers_1.json in the ZIP file.');
-        }
-        if (!followingData) {
-            throw new Error('Could not find following.json in the ZIP file.');
-        }
-
-        // Extract usernames
-        const followers = extractFollowers(followersData);
-        const following = extractFollowing(followingData);
-
-        // Find who doesn't follow back
+        const followers = Object.keys(exported.followers);
+        const following = Object.keys(exported.following);
+        const previous = loadSnapshot();
         const followersSet = new Set(followers);
+        const unfollowers = previous ? previous.followers.filter(user => !followersSet.has(user)) : [];
+
+        if (previous && unfollowers.length > previous.followers.length / 2 &&
+            !confirm(`This export is missing ${unfollowers.length} of your ${previous.followers.length} previous followers. That usually means it isn't an all-time export. Continue anyway?`)) {
+            throw new Error('Cancelled. Please use an export with the date range set to "All time".');
+        }
+
         notFollowingBack = following.filter(user => !followersSet.has(user));
 
-        // Update UI
         document.getElementById('followingCount').textContent = following.length;
         document.getElementById('followersCount').textContent = followers.length;
+        renderUnfollowers(previous, unfollowers);
+
+        saveSnapshot({ followers, savedAt: new Date().toISOString() });
+        renderSnapshotInfo();
 
         updateIgnoreCount();
         renderUserList('');
@@ -251,22 +282,62 @@ async function processFile(file) {
     }
 }
 
-function extractFollowers(data) {
-    // followers_1.json is an array with string_list_data[0].value
-    return data.map(item => {
-        if (item.string_list_data && item.string_list_data[0]) {
-            return item.string_list_data[0].value;
+async function readExport(zip) {
+    const result = {
+        followers: {},
+        following: {},
+        hasFollowers: false,
+        hasFollowing: false
+    };
+
+    for (const [path, zipEntry] of Object.entries(zip.files)) {
+        const name = path.split('/').pop();
+        if (/^followers_\d+\.json$/.test(name)) {
+            Object.assign(result.followers, extractUsers(JSON.parse(await zipEntry.async('string'))));
+            result.hasFollowers = true;
+        } else if (name === 'following.json') {
+            Object.assign(result.following, extractUsers(JSON.parse(await zipEntry.async('string'))));
+            result.hasFollowing = true;
         }
-        return null;
-    }).filter(Boolean);
+    }
+
+    return result;
 }
 
-function extractFollowing(data) {
-    // following.json has relationships_following array with title
-    if (data.relationships_following) {
-        return data.relationships_following.map(item => item.title);
+function extractUsers(data) {
+    const items = Array.isArray(data) ? data : (Object.values(data).find(Array.isArray) || []);
+    const users = {};
+    for (const item of items) {
+        const entry = (item.string_list_data && item.string_list_data[0]) || {};
+        const username = item.title || entry.value || usernameFromHref(entry.href);
+        if (username) users[username] = entry.timestamp || 0;
     }
-    return [];
+    return users;
+}
+
+function usernameFromHref(href) {
+    if (!href) return null;
+    const match = href.match(/instagram\.com\/(?:_u\/)?([^/?#]+)/);
+    return match ? match[1] : null;
+}
+
+function renderUnfollowers(previous, unfollowers) {
+    if (!previous) {
+        unfollowersSection.style.display = 'none';
+        return;
+    }
+    unfollowersSection.style.display = 'block';
+    unfollowersTitle.textContent = `Unfollowed you since ${new Date(previous.savedAt).toLocaleDateString()} (${unfollowers.length})`;
+    unfollowersList.innerHTML = unfollowers.length
+        ? unfollowers.map(user => `
+            <div class="user-item">
+                <span class="user-name">@${user}</span>
+                <div class="user-actions">
+                    <a href="https://www.instagram.com/${user}" target="_blank" rel="noopener" class="user-link">View</a>
+                </div>
+            </div>
+        `).join('')
+        : '<p class="empty-message">Nobody unfollowed you.</p>';
 }
 
 function renderUserList(searchTerm) {

@@ -10,7 +10,14 @@
 <body>
     <div class="container">
         <h1>Instagram Followers Analyzer</h1>
-        <p class="subtitle">Find out who doesn't follow you back</p>
+        <p class="subtitle">Find out who unfollowed you and who doesn't follow you back</p>
+
+        <div class="snapshot-panel">
+            <p class="snapshot-info">
+                <span id="snapshotInfo"></span>
+                <button class="btn btn-secondary btn-small btn-danger" id="clearSnapshot" style="display: none;">Clear saved export</button>
+            </p>
+        </div>
 
         <div class="drop-zone" id="dropZone">
             <div class="drop-zone-icon">📁</div>
@@ -43,6 +50,12 @@
                         <div class="stat-number" id="ignoredCount">0</div>
                         <div class="stat-label">Ignored</div>
                     </div>
+                </div>
+
+                <div class="unfollowers-section" id="unfollowersSection" style="display: none;">
+                    <h3 class="section-title" id="unfollowersTitle"></h3>
+                    <p class="unfollowers-info">Renamed or deactivated accounts also show up here.</p>
+                    <div class="user-list" id="unfollowersList"></div>
                 </div>
 
                 <div class="section-header">
